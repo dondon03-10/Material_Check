@@ -6,7 +6,7 @@ import openpyxl
 from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
 
-def mark_items_with_colors(file_path, inconsistent_names, unique_names, consistent_names, name_col="品名", qty_col="本次领用", diff_dict=None):
+def mark_items_with_colors(file_path, sheet_names, inconsistent_names, unique_names, consistent_names, name_col="品名", qty_col="本次领用", diff_dict=None):
     """
     标记数目不一致为荧光色，数目一致为绿色，只在本表有的品名为红色
     """
@@ -15,7 +15,8 @@ def mark_items_with_colors(file_path, inconsistent_names, unique_names, consiste
     fill_red = PatternFill(fill_type="solid", fgColor="FF0000")     # 红色
 
     wb = openpyxl.load_workbook(file_path)
-    for ws in wb.worksheets:
+    for sheet in sheet_names:
+        ws = wb[sheet]
         # 找到表头行和列
         header_row = None
         name_col_idx = None
@@ -31,24 +32,22 @@ def mark_items_with_colors(file_path, inconsistent_names, unique_names, consiste
                 break
         if not header_row or not name_col_idx or not qty_col_idx:
             continue
+        print(f"处理表: {sheet}, 表头行: {header_row}, 品名列: {name_col_idx}, 数量列: {qty_col_idx}")
+    
         # 标色
-        for row in ws.iter_rows(min_row=header_row+1, min_col=name_col_idx, max_col=name_col_idx):
-            cell = row[0]
-            item_name = str(cell.value).strip()
-            # 数目不一致标荧光
+        for row in ws.iter_rows(min_row=header_row+1, max_row=ws.max_row):
+            name_cell = row[name_col_idx - 1]
+            qty_cell = row[qty_col_idx - 1]
+            item_name = str(name_cell.value).strip() if name_cell.value else ""
             if item_name in inconsistent_names:
-                cell.fill = fill_yellow
-                qty_cell = ws.cell(row=cell.row, column=qty_col_idx)
+                name_cell.fill = fill_yellow
                 qty_cell.fill = fill_yellow
-            # 数目一致标绿
             elif item_name in consistent_names:
-                cell.fill = fill_green
-                qty_cell = ws.cell(row=cell.row, column=qty_col_idx)
+                name_cell.fill = fill_green
                 qty_cell.fill = fill_green
-            # 只在本表有标红（只标品名）
             elif item_name in unique_names:
-                cell.fill = fill_red
-        
+                name_cell.fill = fill_red
+             
         # 在表头右侧添加图注
         legend_start_col = ws.max_column + 2
         ws.cell(row=header_row, column=legend_start_col).fill = fill_yellow
@@ -81,13 +80,11 @@ def mark_items_with_colors(file_path, inconsistent_names, unique_names, consiste
     wb.save(out_path)
     print(f"已输出标色文件: {out_path}")
 
-   
-def process_inventory_data(file_path):
+def process_inventory_data(file_path, sheet_names):
     """处理盘点数据，汇总品名的本次领用数量"""
     inventory_data = defaultdict(int)
     try:
-        xls = pd.ExcelFile(file_path)
-        for sheet in xls.sheet_names:
+        for sheet in sheet_names:
             try:
                 # 强制第二行为表头
                 df = pd.read_excel(file_path, sheet_name=sheet, header=1)
@@ -101,7 +98,7 @@ def process_inventory_data(file_path):
                         continue
                     if pd.api.types.is_number(usage):
                         inventory_data[item_name] += int(usage)
-                        print(f"累计盘点: {item_name} += {usage}")
+                        # print(f"累计盘点: {item_name} += {usage}")
             except Exception as e:
                 print(f"处理盘点表 {sheet} 时出错: {str(e)}")
                 continue
@@ -110,10 +107,10 @@ def process_inventory_data(file_path):
         print(f"读取Excel文件时出错: {str(e)}")
     return dict(inventory_data)
 
-def process_requisition_data(file_path):
+def process_requisition_data(file_path, sheet_name):
     requisition_data = defaultdict(int)
     try:
-        df = pd.read_excel(file_path, skiprows=2)
+        df = pd.read_excel(file_path, sheet_name=sheet_name, header=2)
         print(f"{file_path} 领用单表头: {df.columns.tolist()}")
         print(df.head())
 
@@ -128,7 +125,7 @@ def process_requisition_data(file_path):
                 continue
             if pd.api.types.is_number(qty):
                 requisition_data[item_name] += int(qty)
-                print(f"累计领用: {item_name} += {qty}")
+                # print(f"累计领用: {item_name} += {qty}")
     except Exception as e:
         print(f"处理领用单时出错: {str(e)}")
     return dict(requisition_data)
@@ -165,30 +162,17 @@ def print_items_per_line(items, per_line=10):
         print("，".join(items[i:i+per_line]))
 
 def main():
-    # 假设文件路径
+    # 只需选择一个Excel文件
     project_dir = pathlib.Path(__file__).parent
-    inventory_dir = project_dir / "盘点" 
-    requisition_dir = project_dir / "领用"
+    excel_path = project_dir / "盘点" 
+    # 盘点sheet名
+    inventory_sheets = ["电类盘点", "水类盘点"]
+    requisition_sheet = "领用单"
     
-    # 处理所有盘点文件
-    all_inventory = {}
-    for file in os.listdir(inventory_dir):
-        if file.endswith(".xlsx") or file.endswith(".xls"):
-            file_path = os.path.join(inventory_dir, file)
-            print(f"处理盘点文件: {file}")
-            data = process_inventory_data(file_path)
-            for k, v in data.items():
-                all_inventory[k] = all_inventory.get(k, 0) + v
-    
-    # 处理所有领用单文件
-    all_requisition = {}
-    for file in os.listdir(requisition_dir):
-        if file.endswith(".xlsx") or file.endswith(".xls"):
-            file_path = os.path.join(requisition_dir, file)
-            print(f"处理领用单: {file}")
-            data = process_requisition_data(file_path)
-            for k, v in data.items():
-                all_requisition[k] = all_requisition.get(k, 0) + v
+    # 处理盘点数据
+    all_inventory = process_inventory_data(excel_path, inventory_sheets)
+    # 处理领用单数据
+    all_requisition = process_requisition_data(excel_path, requisition_sheet)
     
     # 比较数据
     consistent, inconsistent, only_in_inventory, only_in_requisition = compare_data(all_inventory, all_requisition)
@@ -221,7 +205,8 @@ def main():
     # 标记不一致的品名
     if consistent or inconsistent or only_in_inventory:
         mark_items_with_colors(
-            inventory_dir,
+            excel_path,
+            sheet_names=inventory_sheets,
             inconsistent_names=set(item['品名'] for item in inconsistent),
             unique_names=only_in_inventory,
             consistent_names=set(item for item, _ in consistent),
@@ -234,7 +219,8 @@ def main():
         )
     if consistent or inconsistent or only_in_requisition:
         mark_items_with_colors(
-            requisition_dir,
+            excel_path,
+            sheet_names=[requisition_sheet],
             inconsistent_names=set(item['品名'] for item in inconsistent),
             unique_names=only_in_requisition,
             consistent_names=set(item for item, _ in consistent),
@@ -245,7 +231,6 @@ def main():
                 for d in inconsistent
             ]
         )
-
 
 if __name__ == "__main__":
     main()
