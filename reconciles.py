@@ -164,7 +164,7 @@ def print_items_per_line(items, per_line=10):
 def main():
     # 只需选择一个Excel文件
     project_dir = pathlib.Path(__file__).parent
-    excel_path = project_dir / "盘点" 
+    excel_path = project_dir / "盘点" / "五金盘点表.xlsx"
     # 盘点sheet名
     inventory_sheets = ["电类盘点", "水类盘点"]
     requisition_sheet = "领用单"
